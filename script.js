@@ -1,15 +1,29 @@
 var canvas = document.getElementById("world");
 var ctx = canvas.getContext("2d");
-var cells = 45;
-var cellSize = 10;
+var cells = 15;
+var cellSize = 30;
 var maxMotive = 100;
 var speed = 250;
+var motiveDecayThresholds = {
+  energy: 0.75,
+  fullness: 0.5,
+  hydration: 0.5,
+};
 
 function rand(max) {
   return Math.floor(Math.random() * max);
 }
 
 function drawWorld() {
+  //update visible stats
+  document.getElementById("full").innerHTML = creature.brain.fullness;
+  document.getElementById("hydration").innerHTML = creature.brain.hydration;
+  document.getElementById("energy").innerHTML = creature.brain.energy;
+  document.getElementById("goal").innerHTML = JSON.stringify(creature.goals);
+  document.getElementById("agoal").innerHTML = creature.activeGoal;
+  document.getElementById("state").innerHTML = creature.state;
+
+  //draw world
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   for (var i = 0; i < cells; i++) {
     for (var j = 0; j < cells; j++) {
@@ -25,6 +39,12 @@ function drawWorld() {
   items.water.draw();
   items.bed.draw();
   creature.draw();
+}
+
+function getGoalIndex(name) {
+  return creature.goals.findIndex(function (goal) {
+    return goal.name === name;
+  });
 }
 
 /*---------- OBJECTS ----------*/
@@ -47,7 +67,7 @@ function Entity(x, y, color) {
 
 Entity.prototype = {
   constructor: Entity,
-  draw: function() {
+  draw: function () {
     ctx.beginPath();
     ctx.fillStyle = this.color;
     ctx.rect(
@@ -57,7 +77,7 @@ Entity.prototype = {
       cellSize
     );
     ctx.fill();
-  }
+  },
 };
 
 Item.prototype = Object.create(Entity.prototype);
@@ -74,8 +94,103 @@ function Creature(x, y, color, fullness, hydration, energy, goal, state) {
   Entity.call(this, x, y, color);
   this.brain = new Brain(fullness, hydration, energy);
   this.goal = goal;
+  this.goals = [];
+  this.activeGoal = "";
   this.state = state;
 }
+
+/*---------- GOALS ----------*/
+
+function prioritiseGoal(goal) {
+  creature.goals.forEach(function (g) {
+    if (g.priority === 1) {
+      g.priority++;
+    }
+  });
+  var index = getGoalIndex(goal);
+  if (index >= 0) {
+    creature.goals[index].priority = 1;
+  }
+  creature.state = "moving"; //test
+}
+
+function deleteGoal(goal) {
+  var index = getGoalIndex(goal);
+  creature.goals.splice(index, 1);
+}
+
+//TODo need to better clean up goals that aren't needed any more
+var goals = {
+  // filters for now just look at the top priority motivation
+  drink: {
+    filter: function () {
+      if (getPriority() === "hydration") {
+        prioritiseGoal("drink");
+      }
+    },
+    run: function () {
+      if (creature.state === "moving") {
+        stateMoving();
+      }
+      if (creature.state === "drinking") {
+        stateDrinking();
+      }
+      if (creature.brain.hydration >= maxMotive) {
+        deleteGoal("drink");
+      }
+    },
+  },
+  eat: {
+    filter: function () {
+      if (getPriority() === "fullness") {
+        prioritiseGoal("eat");
+      }
+    },
+    run: function () {
+      if (creature.state === "moving") {
+        stateMoving();
+      }
+      if (creature.state === "eating") {
+        stateEating();
+      }
+      if (creature.brain.fullness >= maxMotive) {
+        deleteGoal("eat");
+      }
+    },
+  },
+  rest: {
+    filter: function () {
+      if (getPriority() === "energy") {
+        prioritiseGoal("rest");
+      }
+    },
+    run: function () {
+      if (creature.state === "moving") {
+        stateMoving();
+      }
+      if (creature.state === "sleeping") {
+        stateSleeping();
+      }
+      if (creature.brain.energy >= maxMotive) {
+        deleteGoal("rest");
+      }
+    },
+  },
+  wander: {
+    filter: function () {
+      if (getPriority() === "none") {
+        prioritiseGoal("wander");
+      }
+    },
+    run: function () {
+      stateMoving();
+      //this is a default goal, it should delete itself if something more important pops up!
+      if (creature.goals.length > 1) {
+        deleteGoal("wander");
+      }
+    },
+  },
+};
 
 /*---------- STATES ----------*/
 
@@ -99,18 +214,19 @@ function stateSleeping() {
   planSleep();
   //low chance to decay other motives
   //wake up if they become very low
+  //TODO can we suspend the rest goal and reinstate it once the creature has eaten/drunk?
   if (creature.brain.hydration > 0 && Math.random() > 0.75) {
     creature.brain.hydration--;
     if (creature.brain.hydration < 10) {
       creature.state = "moving";
-      creature.goal = "drink";
+      creature.activeGoal = "drink";
     }
   }
   if (creature.brain.fullness > 0 && Math.random() > 0.75) {
     creature.brain.fullness--;
     if (creature.brain.fullness < 10) {
       creature.state = "moving";
-      creature.goal = "eat";
+      creature.activeGoal = "eat";
     }
   }
   if (creature.brain.energy >= maxMotive) {
@@ -120,8 +236,8 @@ function stateSleeping() {
 }
 
 function stateMoving() {
-  motiveDecay();
-  switch (creature.goal) {
+  // motiveDecay();
+  switch (creature.activeGoal) {
     case "drink":
       planMoveToItem(items.water);
       break;
@@ -138,21 +254,21 @@ function stateMoving() {
   if (
     creature.position.x === items.water.position.x &&
     creature.position.y === items.water.position.y &&
-    creature.goal === 'drink'
+    creature.activeGoal === "drink"
   ) {
     creature.state = "drinking";
   }
   if (
     creature.position.x === items.food.position.x &&
     creature.position.y === items.food.position.y &&
-    creature.goal === 'eat'
+    creature.activeGoal === "eat"
   ) {
     creature.state = "eating";
   }
   if (
     creature.position.x === items.bed.position.x &&
     creature.position.y === items.bed.position.y &&
-    creature.goal === 'rest'
+    creature.activeGoal === "rest"
   ) {
     creature.state = "sleeping";
   }
@@ -160,8 +276,11 @@ function stateMoving() {
 
 /*---------- PLANS ----------*/
 
+// NOTE: plans may be where the animation is incorporated, should this layer ever be implemented
+// could basic animations (thought bubbles for mood) be added in future?
+
 function planMoveRandomly() {
-  direction = Math.floor(Math.random() * 8 + 1);
+  var direction = Math.floor(Math.random() * 8 + 1);
   //TODO don't waste a turn if it can't move
   switch (direction) {
     case 1:
@@ -254,76 +373,101 @@ function planSleep() {
 /*---------- ACTION ----------*/
 
 function tick() {
-  //determine goal
-  switch (getPriority()) {
-    case "hydration":
-      creature.goal = "drink";
-      break;
-    case "fullness":
-      creature.goal = "eat";
-      break;
-    case "energy":
-      creature.goal = "rest";
-      break;
-    default:
-      creature.goal = "wander";
-      break;
-  }
-  switch(creature.state) {
-    case 'drinking':
-      stateDrinking();
-      break;
-    case 'eating':
-      stateEating();
-      break;
-    case 'sleeping':
-      stateSleeping();
-      break;
-    default:
-      stateMoving();
-      break;
-  }
-
-  //update visible stats
-  document.getElementById("full").innerHTML = creature.brain.fullness;
-  document.getElementById("hydration").innerHTML = creature.brain.hydration;
-  document.getElementById("energy").innerHTML = creature.brain.energy;
-  document.getElementById("goal").innerHTML = creature.goal;
-  document.getElementById("state").innerHTML = creature.state;
+  motiveDecay();
+  filterGoals();
   drawWorld();
 }
 
 function motiveDecay() {
-  for (motive in creature.brain) {
-    //50/50 chance of decaying this turn
-    if (creature.brain[motive] > 0 && Math.random() > 0.5) {
-      creature.brain[motive]--;
-    }
+  //energy
+  if (creature.state !== "sleeping" && creature.brain.energy > 0 && Math.random() > motiveDecayThresholds.energy) {
+    creature.brain.energy--;
+  }
+  //hydration
+  if (creature.state !== "drinking" && creature.brain.hydration > 0 && Math.random() > motiveDecayThresholds.hydration) {
+    creature.brain.hydration--;
+  }
+  //fullness
+  if (creature.state !== "eating" && creature.brain.fullness > 0 && Math.random() > motiveDecayThresholds.fullness) {
+    creature.brain.fullness--;
   }
 }
 
 function getPriority() {
   var lowest = maxMotive;
   var priority;
-  for (motive in creature.brain) {
+  for (var motive in creature.brain) {
     if (creature.brain[motive] < lowest) {
       lowest = creature.brain[motive];
       priority = motive;
     }
   }
-  if (lowest > maxMotive / 2) {
+  //in general, only make a goal a strong priority if it's 10% of the max
+  //this could later be related to personality traits (lazy, likes to eat, etc)
+  if (lowest > maxMotive / 10) {
     priority = "none";
+  }
+  if (amIBusy()) {
+    priority = "continue";
   }
   return priority;
 }
 
+function amIBusy() {
+  return creature.state === "eating" || creature.state === "drinking" || creature.state === "sleeping";
+}
+
+function filterGoals() {
+  // TODO - this should really get anything with a threshold value, just in order of priority
+  var goalName;
+  var priority = getPriority();
+  switch (priority) {
+    case "continue":
+      // no change
+      break;
+    case "hydration":
+      if (getGoalIndex("drink") < 0) {
+        creature.goals.push({ name: "drink", priority: 1, suspended: false });
+      }
+      break;
+    case "fullness":
+      if (getGoalIndex("eat") < 0) {
+        creature.goals.push({ name: "eat", priority: 1, suspended: false });
+      }
+      break;
+    case "energy":
+      if (getGoalIndex("rest") < 0) {
+        creature.goals.push({ name: "rest", priority: 1, suspended: false });
+      }
+      break;
+    default:
+      if (getGoalIndex("wander") < 0) {
+        creature.goals.push({ name: "wander", priority: 1, suspended: false });
+      }
+      break;
+  }
+  //run filters on each goal
+  creature.goals.forEach(function (goal) {
+    goals[goal.name].filter();
+  });
+  //sort by priority
+  //TODO - changing the active goal causes the creature to get stuck, fix!
+  creature.goals.sort(function (a, b) {
+    return a.priority - b.priority;
+  });
+  //show active goal
+  creature.activeGoal = creature.goals[0].name;
+  //and run
+  goals[creature.activeGoal].run();
+}
+
 //click to move creature
-canvas.addEventListener("click", function(e) {
+canvas.addEventListener("click", function (e) {
   var x = e.pageX - canvas.offsetLeft;
   var y = e.pageY - canvas.offsetTop;
 
-  creature.position.x = Math.floor(x / 10);
-  creature.position.y = Math.floor(y / 10);
+  creature.position.x = Math.floor(x / cellSize);
+  creature.position.y = Math.floor(y / cellSize);
   drawWorld();
 });
 
@@ -333,7 +477,7 @@ canvas.addEventListener("click", function(e) {
 var items = {
   food: new Item(rand(cells), rand(cells), "green"),
   water: new Item(rand(cells), rand(cells), "blue"),
-  bed: new Item(rand(cells), rand(cells), "purple")
+  bed: new Item(rand(cells), rand(cells), "purple"),
 };
 
 //init creature
@@ -351,8 +495,6 @@ let creature = new Creature(
 //visuals
 canvas.width = cells * cellSize;
 canvas.height = cells * cellSize;
-
-drawWorld();
 
 //move it about
 var motion = setInterval(tick, speed);
