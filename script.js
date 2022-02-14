@@ -24,6 +24,7 @@ function drawWorld() {
   document.getElementById("state").innerHTML = creature.state;
 
   //draw world
+  //TODO shouldn't have to draw the whole grid just to move the creature about
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   for (var i = 0; i < cells; i++) {
     for (var j = 0; j < cells; j++) {
@@ -39,12 +40,6 @@ function drawWorld() {
   items.water.draw();
   items.bed.draw();
   creature.draw();
-}
-
-function getGoalIndex(name) {
-  return creature.goals.findIndex(function (goal) {
-    return goal.name === name;
-  });
 }
 
 /*---------- OBJECTS ----------*/
@@ -101,6 +96,12 @@ function Creature(x, y, color, fullness, hydration, energy, goal, state) {
 
 /*---------- GOALS ----------*/
 
+function getGoalIndex(name) {
+  return creature.goals.findIndex(function (goal) {
+    return goal.name === name;
+  });
+}
+
 function prioritiseGoal(goal) {
   creature.goals.forEach(function (g) {
     if (g.priority === 1) {
@@ -112,6 +113,16 @@ function prioritiseGoal(goal) {
     creature.goals[index].priority = 1;
   }
   creature.state = "moving"; //test
+}
+
+function suspendGoal(goal) {
+  var index = getGoalIndex(goal);
+  creature.goals[index].suspended = true;
+}
+
+function reinstateGoal(goal) {
+  var index = getGoalIndex(goal);
+  creature.goals[index].suspended = false;
 }
 
 function deleteGoal(goal) {
@@ -212,22 +223,17 @@ function stateEating() {
 
 function stateSleeping() {
   planSleep();
-  //low chance to decay other motives
-  //wake up if they become very low
+  //wake up if hungry/thirsty
   //TODO can we suspend the rest goal and reinstate it once the creature has eaten/drunk?
-  if (creature.brain.hydration > 0 && Math.random() > 0.75) {
-    creature.brain.hydration--;
-    if (creature.brain.hydration < 10) {
-      creature.state = "moving";
-      creature.activeGoal = "drink";
-    }
+  if (creature.brain.hydration < maxMotive / 10) {
+    creature.state = "moving";
+    creature.activeGoal = "drink";
+    suspendGoal("rest");
   }
-  if (creature.brain.fullness > 0 && Math.random() > 0.75) {
-    creature.brain.fullness--;
-    if (creature.brain.fullness < 10) {
-      creature.state = "moving";
-      creature.activeGoal = "eat";
-    }
+  if (creature.brain.fullness < maxMotive / 10) {
+    creature.state = "moving";
+    creature.activeGoal = "eat";
+    suspendGoal("rest");
   }
   if (creature.brain.energy >= maxMotive) {
     creature.brain.energy = maxMotive;
@@ -379,6 +385,7 @@ function tick() {
 }
 
 function motiveDecay() {
+  //TODO decay slower if sleeping?
   //energy
   if (creature.state !== "sleeping" && creature.brain.energy > 0 && Math.random() > motiveDecayThresholds.energy) {
     creature.brain.energy--;
@@ -419,6 +426,7 @@ function amIBusy() {
 
 function filterGoals() {
   // TODO - this should really get anything with a threshold value, just in order of priority
+  // TODO check if any goals are suspended and need to be reinstated (ie nothing else should take priority)
   var goalName;
   var priority = getPriority();
   switch (priority) {
@@ -498,3 +506,14 @@ canvas.height = cells * cellSize;
 
 //move it about
 var motion = setInterval(tick, speed);
+
+/*---------- DEBUG FUNCTIONS ----------*/
+document.getElementById("makeThirsty").addEventListener("click", function() {
+  creature.brain.hydration = maxMotive / 10;
+});
+document.getElementById("makeHungry").addEventListener("click", function() {
+  creature.brain.fullness = maxMotive / 10;
+});
+document.getElementById("makeTired").addEventListener("click", function() {
+  creature.brain.energy = maxMotive / 10;
+});
