@@ -176,6 +176,7 @@ var goals = {
   },
   rest: {
     filter: function () {
+      // TODO seems to get stuck when done eating/drinking
       if (
         getPriority() === "energy"
         || (getPriority !== "fullness" && getPriority !== "hydration" && !amIBusy() && getGoalIndex("rest", true) >=0)
@@ -197,16 +198,16 @@ var goals = {
   },
   wander: {
     filter: function () {
+      //this is a default goal, it should delete itself if something more important pops up!
+      if (creature.goals.length > 1) {
+        deleteGoal("wander");
+      }
       if (getPriority() === "none") {
         prioritiseGoal("wander");
       }
     },
     run: function () {
       stateMoving();
-      //this is a default goal, it should delete itself if something more important pops up!
-      if (creature.goals.length > 1) {
-        deleteGoal("wander");
-      }
     },
   },
 };
@@ -232,7 +233,6 @@ function stateEating() {
 function stateSleeping() {
   planSleep();
   //wake up if hungry/thirsty
-  //TODO can we suspend the rest goal and reinstate it once the creature has eaten/drunk?
   if (creature.brain.hydration < maxMotive / 10) {
     creature.state = "moving";
     creature.activeGoal = "drink";
@@ -250,7 +250,6 @@ function stateSleeping() {
 }
 
 function stateMoving() {
-  // motiveDecay();
   switch (creature.activeGoal) {
     case "drink":
       planMoveToItem(items.water);
