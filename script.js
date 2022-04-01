@@ -22,6 +22,7 @@ function drawWorld() {
   document.getElementById("goal").innerHTML = JSON.stringify(creature.goals);
   document.getElementById("agoal").innerHTML = creature.activeGoal;
   document.getElementById("state").innerHTML = creature.state;
+  document.getElementById("priority").innerHTML = getPriority();
 
   //draw world
   //TODO shouldn't have to draw the whole grid just to move the creature about
@@ -96,23 +97,28 @@ function Creature(x, y, color, fullness, hydration, energy, goal, state) {
 
 /*---------- GOALS ----------*/
 
-function getGoalIndex(name) {
+function getGoalIndex(name, suspended) {
   return creature.goals.findIndex(function (goal) {
-    return goal.name === name;
+    if (suspended) {
+      return goal.name === name && goal.suspended
+    } else {
+      return goal.name === name;
+    }
   });
 }
 
+function hasSuspendedGoals() {
+  return creature.goals.findIndex(function(goal) { return goal.suspended }) >= 0;
+}
+
 function prioritiseGoal(goal) {
-  creature.goals.forEach(function (g) {
-    if (g.priority === 1) {
-      g.priority++;
-    }
+  creature.goals.forEach(function(g) {
+    g.current = false;
   });
   var index = getGoalIndex(goal);
   if (index >= 0) {
-    creature.goals[index].priority = 1;
+    creature.goals[index].current = true;
   }
-  creature.state = "moving"; //test
 }
 
 function suspendGoal(goal) {
@@ -130,9 +136,8 @@ function deleteGoal(goal) {
   creature.goals.splice(index, 1);
 }
 
-//TODo need to better clean up goals that aren't needed any more
+//TODO need to better clean up goals that aren't needed any more
 var goals = {
-  // filters for now just look at the top priority motivation
   drink: {
     filter: function () {
       if (getPriority() === "hydration") {
@@ -171,7 +176,10 @@ var goals = {
   },
   rest: {
     filter: function () {
-      if (getPriority() === "energy") {
+      if (
+        getPriority() === "energy"
+        || (getPriority !== "fullness" && getPriority !== "hydration" && !amIBusy() && getGoalIndex("rest", true) >=0)
+      ) {
         prioritiseGoal("rest");
       }
     },
@@ -417,10 +425,12 @@ function getPriority() {
   if (amIBusy()) {
     priority = "continue";
   }
+  //TODO are there any suspended goals that may affect the priority?
   return priority;
 }
 
 function amIBusy() {
+  // is the creature doing something that shouldn't be interrupted unless something urgent has come up?
   return creature.state === "eating" || creature.state === "drinking" || creature.state === "sleeping";
 }
 
@@ -435,22 +445,22 @@ function filterGoals() {
       break;
     case "hydration":
       if (getGoalIndex("drink") < 0) {
-        creature.goals.push({ name: "drink", priority: 1, suspended: false });
+        creature.goals.push({ name: "drink", current: true, suspended: false });
       }
       break;
     case "fullness":
       if (getGoalIndex("eat") < 0) {
-        creature.goals.push({ name: "eat", priority: 1, suspended: false });
+        creature.goals.push({ name: "eat", current: true, suspended: false });
       }
       break;
     case "energy":
       if (getGoalIndex("rest") < 0) {
-        creature.goals.push({ name: "rest", priority: 1, suspended: false });
+        creature.goals.push({ name: "rest", current: true, suspended: false });
       }
       break;
     default:
       if (getGoalIndex("wander") < 0) {
-        creature.goals.push({ name: "wander", priority: 1, suspended: false });
+        creature.goals.push({ name: "wander", current: true, suspended: false });
       }
       break;
   }
@@ -458,13 +468,12 @@ function filterGoals() {
   creature.goals.forEach(function (goal) {
     goals[goal.name].filter();
   });
-  //sort by priority
-  //TODO - changing the active goal causes the creature to get stuck, fix!
-  creature.goals.sort(function (a, b) {
-    return a.priority - b.priority;
+  //get active goal
+  let activeGoalIndex = creature.goals.findIndex(function(goal) {
+    return goal.current;
   });
   //show active goal
-  creature.activeGoal = creature.goals[0].name;
+  creature.activeGoal = creature.goals[activeGoalIndex].name;
   //and run
   goals[creature.activeGoal].run();
 }
